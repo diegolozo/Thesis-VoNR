@@ -6,6 +6,7 @@ https://kamailio.org/docs/tutorials/devel/kamailio-install-guide-deb/
 sudo apt update
 sudo apt install default-mysql-server -y
 sudo apt install kamailio kamailio-mysql-modules -y
+sudo apt install kamailio-presence-modules -y
 ```
 
 Para revisar donde se instaló kamailio: ```which kamailio```
@@ -15,6 +16,8 @@ Para ver todos los paquetes específicos: ```sudo apt search kamailio```
 ## Archivos de configuración
 
 Las configuraciones están en ```/etc/kamailio```
+
+Los modulos disponibles compilados (.so) están en ```/usr/lib/x86_64-linux-gnu/kamailio/modules```
 
 El archivo ```/etc/kamailio/kamctlrc``` tiene configuraciones de **direcciones IP y MYSQL**. Dentro del archivo, hay que realizar los siguientes cambios:
 
@@ -89,6 +92,8 @@ y confirmar que se está ejecutando. Se puede iniciar y detener con:
 systemctl start kamailio
 systemctl stop kamailio
 ```
+
+**IMPORTANTE**: Si se realiza un cambio en el archivo ```kamailio.cfg``` y al se iniciar/resetear el servicio aparece un error, este se puede revisar leyendo el archivo ```var/log/syslog```
 
 También se puede configurar en consola para que inicie de forma automática al bootear (no sé si funciona bien):
 

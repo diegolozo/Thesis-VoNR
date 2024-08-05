@@ -7,8 +7,8 @@ Repository for VoNR and 5G SA implementation. Based on the open-source libraries
 ## Roadmap
 
 - SIP Server to setup calls (**Done**).
-- SIP Server to send SMS (*In progress*).
-- Install IMS and HSS.
+- SIP Server to send messages (**Done**).
+- Install IMS and HSS (*In progress*).
 - Connect IMS/HSS with 5G SA System.
 - Calling Test. 
 
@@ -16,10 +16,6 @@ Repository for VoNR and 5G SA implementation. Based on the open-source libraries
 
 ### Install initial Kamailio SIP Server
 [Kamailio Install Guide](./docs/install_kamailio.md)
-
-### Install SMS-OPS module for Kamailio
-
-*In progress*
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
