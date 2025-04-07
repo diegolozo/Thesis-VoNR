@@ -20,6 +20,9 @@ COPY kamctlrc /etc/kamailio/kamctlrc
 # Exponer puertos para SIP (UDP y TCP)
 EXPOSE 5060/udp 5060/tcp
 
+# Exponer puertos RTP
+EXPOSE 10000-20000/udp
+
 # 3 letras "y"
 
 # Mantener el contenedor en ejecución para poder acceder al bash

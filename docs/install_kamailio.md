@@ -6,7 +6,7 @@ https://kamailio.org/docs/tutorials/devel/kamailio-install-guide-deb/
 sudo apt update
 sudo apt install default-mysql-server -y
 sudo apt install kamailio kamailio-mysql-modules -y
-sudo apt install kamailio-presence-modules -y
+sudo apt install kamailio-presence-modules kamailio-dialog -y
 ```
 
 Para revisar donde se instaló kamailio: ```which kamailio```

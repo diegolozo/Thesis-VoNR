@@ -4,7 +4,7 @@
 ## scripts. Per default all variables here are commented out, the control tools
 ## will use their internal default values.
 
-SIP_DOMAIN=localhost
+SIP_DOMAIN=172.22.0.40
 
 DBENGINE=MYSQL
 
