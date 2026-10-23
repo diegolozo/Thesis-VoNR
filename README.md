@@ -17,8 +17,7 @@ The main contribution is the evaluation methodology together with a standardized
 
 The testbed is a private 5G Standalone network deployed with open-source software and a software-defined radio. Two commercial smartphones act as the video call endpoints (A and B), and a third device generates background traffic to create congestion.
 
-<!-- Replace with the path of your architecture diagram -->
-![System architecture](docs/figures/architecture.png)
+![System architecture](docs/diagrama_setup_exp.png)
 
 | Component | Software / Hardware | Version |
 |---|---|---|
