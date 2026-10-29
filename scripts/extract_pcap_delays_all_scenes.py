@@ -1,3 +1,60 @@
+"""
+extract_pcap_delays_all_scenes.py
+
+Same analysis as extract_pcap_delays.py, but it processes SEVERAL scenarios in a
+single run (one after the other). For every scenario it computes the delay and
+jitter of the audio and video streams of its 21 video calls, and the call
+setup time, from the packet captures (.pcap) taken during the calls.
+
+HOW TO USE
+----------
+1. Capture the traffic of the 5G network with tshark during each call, one
+   file per call, named capture1.pcap ... capture21.pcap. The capture can be
+   done in real time on the core interface, excluding the iperf traffic and the
+   traffic of the machine that runs the capture (10.45.0.X is the IP of that
+   machine), for example:
+
+       tshark -i ogstun -f "not (tcp port 5201) and not (host 10.45.0.X)" -w capture1.pcap
+
+2. Place the 21 files of each scenario in its own folder:
+
+       <BASE_DIR>/scene_<SCENE>/
+
+3. Set the variables in the CONFIGURATION section below. They are the only
+   values that need to be edited; all the paths are built from them.
+
+4. Run the script (tshark and scapy must be installed). The output folders are
+   created automatically if they do not exist. A scenario whose folder is
+   missing or has no usable captures is reported and skipped, and the script
+   continues with the next one.
+
+WHAT IT DOES
+------------
+- For every capture, it first creates a "fixed_" copy in which the IP address
+  OLD_IP is replaced by NEW_IP, so that all the network nodes share the prefix
+  NETWORK_PREFIX. Existing "fixed_" files are reused, not generated again.
+- It detects the topology from the SIP traffic: the two terminals (A and B) and
+  the SIP server. The server is the node with more SIP packets.
+- The delay of each leg (terminal -> server and server -> terminal) is computed
+  from the "frame.time_delta" field of tshark. The end-to-end delay of each
+  direction is the sum of its two legs: A->B = (A->server) + (server->B), and
+  B->A = (B->server) + (server->A).
+- The jitter is the standard deviation of those per-packet values, taken from
+  the first leg of each direction.
+- Audio and video streams are told apart by the mean UDP packet length
+  (audio below 300 bytes, video above 500 bytes).
+
+OUTPUT
+------
+One file per scenario:
+
+    <BASE_DIR>/done/delayscene_<SCENE>.csv
+
+One row per call, separated by ";", with the columns: call_num,
+call_setup_time_ms, and the audio/video delay and jitter (in ms) of each
+direction (A_B and B_A).
+"""
+
 import subprocess
 import statistics
 import csv
@@ -6,19 +63,21 @@ from collections import defaultdict
 from scapy.all import *
 
 
-# tshark -i ogstun -f "not (tcp port 5201) and not (host 10.45.0.X)" -w captura1.pcap
+# ============ CONFIGURATION ============
+BASE_DIR = "delays"        # Folder that contains the scenario folders and the "done" folder
+SCENES = range(11, 19)     # Scenarios to process: 11, 12, ..., 18 (the last number is excluded)
 
-# ============ CONFIGURACIÓN ============
+NETWORK_PREFIX = "10.45.0"
+OLD_IP = "192.168.100.178"   # IP address to replace in the captures
+NEW_IP = "10.45.0.1"         # IP address that replaces OLD_IP
+
+# Paths of the scenario being processed (set automatically by main(), do not edit)
 SCENE = None
 SCENE_FOLDER = None
 FIXED_FOLDER = None
 OUTPUT_CSV = None
- 
-NETWORK_PREFIX = "10.45.0"
-OLD_IP = "192.168.100.178"
-NEW_IP = "10.45.0.1"
 
-# ============ FUNCIONES AUXILIARES ============
+# ============ HELPER FUNCTIONS ============
 def run_tshark(pcap_file, fields, filter_exp):
     cmd = ["tshark", "-r", pcap_file, "-Y", filter_exp, "-T", "fields"]
     for f in fields:
@@ -61,7 +120,7 @@ def detect_topology(pcap_file):
         if dst.startswith(NETWORK_PREFIX):
             counts[dst] += 1
     if len(counts) < 3:
-        raise Exception(f"No se detectaron suficientes nodos SIP en {pcap_file}")
+        raise Exception(f"Not enough SIP nodes were detected in {pcap_file}")
     server = max(counts, key=counts.get)
     ues = [ip for ip in counts if ip != server]
     return ues[0], ues[1], server
@@ -74,7 +133,7 @@ def compute_call_setup_time(pcap_file, caller, callee):
     return (ring_time - invite_time) * 1000
 
 def analyze_srtp_streams(pcap_file, src, dst):
-    """Analiza SRTP usando tamaño de paquete"""
+    """Analyzes SRTP streams using the packet size"""
     udp_filter = f"udp && ip.src=={src} && ip.dst=={dst} && !sip"
     
     cmd = ["tshark", "-r", pcap_file, "-Y", udp_filter, "-T", "fields",
@@ -130,13 +189,13 @@ def analyze_srtp_streams(pcap_file, src, dst):
     return audio_delay, video_delay, audio_jitter, video_jitter
 
 def analyze_direction(pcap_file, src, dst):
-    """Analiza una dirección completa (SIP + medios)"""
-    # Análisis SIP
+    """Analyzes one full direction (SIP + media)"""
+    # SIP analysis
     sip_filter = f"(sip || tcp.port==5061 || tls) && ip.src=={src} && ip.dst=={dst}"
     sip_lines = run_tshark(pcap_file, ["frame.time_delta"], sip_filter)
     sip_delay = compute_delay(sip_lines)
     
-    # Analizar medios
+    # Analyze media
     audio_delay, video_delay, audio_jitter, video_jitter = analyze_srtp_streams(pcap_file, src, dst)
     
     return {
@@ -148,7 +207,7 @@ def analyze_direction(pcap_file, src, dst):
     }
 
 def fix_pcap(original_file, fixed_file):
-    """Fija las IPs en el archivo pcap"""
+    """Replaces the IP addresses in the pcap file"""
     try:
         packets = rdpcap(original_file)
         for p in packets:
@@ -161,56 +220,56 @@ def fix_pcap(original_file, fixed_file):
         wrpcap(fixed_file, packets)
         return True
     except Exception as e:
-        print(f"  Error al fijar el archivo: {e}")
+        print(f"  Error while fixing the file: {e}")
         return False
 
 def process_pcap(pcap_num):
-    """Procesa un solo archivo pcap y retorna las métricas"""
+    """Processes a single pcap file and returns its metrics"""
     original_name = f"capture{pcap_num}.pcap"
     original_path = os.path.join(SCENE_FOLDER, original_name)
     fixed_name = f"fixed_{original_name}"
     fixed_path = os.path.join(FIXED_FOLDER, fixed_name)
     
-    print(f"\n[INFO] Procesando iteración {pcap_num}/21: {original_name}")
+    print(f"\n[INFO] Processing iteration {pcap_num}/21: {original_name}")
     
-    # Verificar si existe el archivo original
+    # Check that the original file exists
     if not os.path.exists(original_path):
-        print(f"  [WARNING] No existe {original_path}, saltando...")
+        print(f"  [WARNING] {original_path} does not exist, skipping...")
         return None
     
-    # Fijar el archivo (si no existe el fixed o forzar regeneración)
+    # Fix the file (if the fixed file does not exist; delete it to force regeneration)
     if not os.path.exists(fixed_path):
-        print(f"  [INFO] Generando archivo fixed...")
+        print(f"  [INFO] Generating fixed file...")
         if not fix_pcap(original_path, fixed_path):
-            print(f"  [ERROR] No se pudo fijar {original_name}")
+            print(f"  [ERROR] Could not fix {original_name}")
             return None
     
     try:
-        # Detectar topología
+        # Detect topology
         A, B, SERVER = detect_topology(fixed_path)
         
-        # Calcular Call Setup Time
+        # Compute Call Setup Time
         call_setup_time = compute_call_setup_time(fixed_path, A, B)
         
-        # Analizar flujos
+        # Analyze flows
         a_to_server = analyze_direction(fixed_path, A, SERVER)
         server_to_b = analyze_direction(fixed_path, SERVER, B)
         b_to_server = analyze_direction(fixed_path, B, SERVER)
         server_to_a = analyze_direction(fixed_path, SERVER, A)
         
-        # Calcular totales
+        # Compute totals
         ab_audio = a_to_server['audio_delay'] + server_to_b['audio_delay']
         ab_video = a_to_server['video_delay'] + server_to_b['video_delay']
         ba_audio = b_to_server['audio_delay'] + server_to_a['audio_delay']
         ba_video = b_to_server['video_delay'] + server_to_a['video_delay']
         
-        # Jitter (usamos el del primer tramo, que es donde se genera)
+        # Jitter (the first leg is used, since that is where it is generated)
         ab_audio_jitter = a_to_server['audio_jitter']
         ab_video_jitter = a_to_server['video_jitter']
         ba_audio_jitter = b_to_server['audio_jitter']
         ba_video_jitter = b_to_server['video_jitter']
         
-        # Mostrar resultados
+        # Show results
         print(f"  [OK] Call Setup Time: {call_setup_time:.2f}ms")
         print(f"  [OK] A→B: Audio={ab_audio:.2f}ms, Video={ab_video:.2f}ms")
         print(f"  [OK] B→A: Audio={ba_audio:.2f}ms, Video={ba_video:.2f}ms")
@@ -229,7 +288,7 @@ def process_pcap(pcap_num):
         }
         
     except Exception as e:
-        print(f"  [ERROR] Falló el procesamiento: {e}")
+        print(f"  [ERROR] Processing failed: {e}")
         return None
 
 def main(scene):
@@ -240,25 +299,31 @@ def main(scene):
     global OUTPUT_CSV
 
     SCENE = scene
-    SCENE_FOLDER = f"delays/scene_{SCENE}"
-    FIXED_FOLDER = f"delays/scene_{SCENE}"
-    OUTPUT_CSV = f"delays/done/delayscene_{SCENE}.csv"
+    SCENE_FOLDER = f"{BASE_DIR}/scene_{SCENE}"                # Folder with the original captures
+    FIXED_FOLDER = SCENE_FOLDER                               # Folder where the "fixed_" captures are saved
+    OUTPUT_CSV = f"{BASE_DIR}/done/delayscene_{SCENE}.csv"    # Output file
 
-    print(f"\n🚀 Procesando SCENE {SCENE}")
+    print(f"\n🚀 Processing SCENE {SCENE}")
 
-    # Crear carpeta fixed si no existe
+    # Check the input folder and create the output folders if they do not exist
+    if not os.path.isdir(SCENE_FOLDER):
+        print(f"\n❌ Input folder not found: {SCENE_FOLDER}")
+        print("   Check BASE_DIR and the scenario number, and make sure the captures "
+              "(capture1.pcap ... capture21.pcap) are inside that folder.")
+        return False
     os.makedirs(FIXED_FOLDER, exist_ok=True)
+    os.makedirs(os.path.dirname(OUTPUT_CSV), exist_ok=True)
 
-    # Procesar los 21 archivos
-    resultados = []
+    # Process the 21 files
+    results = []
 
     for i in range(1, 22):
-        resultado = process_pcap(i)
-        if resultado:
-            resultados.append(resultado)
+        result = process_pcap(i)
+        if result:
+            results.append(result)
 
-    # Guardar resultados en CSV
-    if resultados:
+    # Save results to CSV
+    if results:
         with open(OUTPUT_CSV, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = [
                 'call_num',
@@ -281,7 +346,7 @@ def main(scene):
 
             writer.writeheader()
 
-            for r in resultados:
+            for r in results:
                 writer.writerow({
                     'call_num': r['num_sim'],
                     'call_setup_time_ms': round(r['call_setup_time_ms'], 3),
@@ -295,12 +360,30 @@ def main(scene):
                     'video_jitter_B_A_ms': round(r['ba_video_jitter'], 3)
                 })
 
-        print(f"\n✅ SCENE {SCENE} completada")
-        print(f"CSV: {OUTPUT_CSV}")
+        print(f"\n✅ SCENE {SCENE} completed ({len(results)}/21 files processed)")
+        print(f"CSV: {os.path.abspath(OUTPUT_CSV)}")
+        return True
 
     else:
-        print(f"\n❌ No se pudo procesar la escena {SCENE}")
+        print(f"\n❌ SCENE {SCENE} could not be processed")
+        print("   Check that the files capture1.pcap to capture21.pcap exist in the folder:", SCENE_FOLDER)
+        return False
 
 if __name__ == "__main__":
-    for scene in range(11, 19):   # 11,12,...,18
-        main(scene)
+    completed = []
+    failed = []
+
+    for scene in SCENES:
+        if main(scene):
+            completed.append(scene)
+        else:
+            failed.append(scene)
+
+    print("\n" + "=" * 60)
+    print("SUMMARY")
+    print("=" * 60)
+    print(f"Scenarios completed: {completed if completed else 'none'}")
+    if failed:
+        print(f"Scenarios NOT processed: {failed}")
+    if completed:
+        print(f"Results saved in: {os.path.abspath(os.path.join(BASE_DIR, 'done'))}")

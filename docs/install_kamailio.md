@@ -1,168 +1,74 @@
-https://kamailio.org/docs/tutorials/devel/kamailio-install-guide-deb/
+# Kamailio Installation Guide
 
-# Instalación Kamailio en Ubuntu 22.04
+This guide covers the installation of Kamailio as the SIP server used in this work (version 6.0.1), plus the extra steps and fixes that were needed on top of the official instructions.
 
-```
-sudo apt update
-sudo apt install default-mysql-server -y
-sudo apt install kamailio kamailio-mysql-modules -y
-sudo apt install kamailio-presence-modules kamailio-dialog -y
-```
+## 1. Installation
 
-Para revisar donde se instaló kamailio: ```which kamailio```
+Follow the official Kamailio 6.0 installation guide (from Git):
 
-Para ver todos los paquetes específicos: ```sudo apt search kamailio```
+https://github.com/kamailio/kamailio-docs/blob/master/kamailio-6.0-install-guide-git/docs/index.md
 
-## Archivos de configuración
+### Troubleshooting: `kamdbctl.mysql` not found
 
-Las configuraciones están en ```/etc/kamailio```
+If the database creation step fails because the file `kamdbctl.mysql` cannot be found, locate it first:
 
-Los modulos disponibles compilados (.so) están en ```/usr/lib/x86_64-linux-gnu/kamailio/modules```
-
-El archivo ```/etc/kamailio/kamctlrc``` tiene configuraciones de **direcciones IP y MYSQL**. Dentro del archivo, hay que realizar los siguientes cambios:
-
-```sudo nano /etc/kamailio/kamctlrc```
-
-Y dentro del archivo, descomentar modificiar las siguientes líneas:
-
-```
-SIP_DOMAIN=localhost
-
-DBENGINE=MYSQL
-
-DBHOST=localhost
-
-DBPORT=3306
-
-DBNAME=kamailio
-
-DBRWUSER="kamailio"
-DBRWPW="kamailiorw1"
-
-DBROUSER="kamailioro"
-DBROPW="kamailioro1"
-
-DBROOTUSER="root"
-DBROOTPW="dbrootpw1"
-
-CHARSET="utf16"
+```bash
+sudo find / -type f -name "kamdbctl.mysql" 2>/dev/null
 ```
 
-EL archivo ```/etc/kamailio/kamailio.cfg``` tiene las configuraciones de kamailio como tal. Dentro del archivo, agregar los siguiente debajo de la primera línea:
+Then copy it to the location where Kamailio expects it (the path shown in the error message):
 
-```sudo nano /etc/kamailio/kamailio.cfg```
-
-```
-#!define WITH_MYSQL
-#!define WITH_AUTH
-#!define WITH_USRLOCDB
-#!define DBURL "mysql://kamailio:kamailiorw1@localhost/kamailio"
+```bash
+sudo cp <original_path> <expected_path>
 ```
 
-Notar que ```kamailiorw1``` corresponde al valor de ```DBRWPW``` en el archivo ```/etc/kamailio/kamctlrc```
+Where:
 
-# Crear base de datos
+- `<original_path>`: where `find` located `kamdbctl.mysql`.
+- `<expected_path>`: where Kamailio looks for it.
 
-Para crear la base de datos, ejecutar
+## 2. Running the service
 
-```sudo kamdbctl create```
+After the installation, the Kamailio service should already be running. Check it with:
 
-Se deben ignorar los warnings. Cada vez que pregunte, escribir la letra **y**, luego apretar ENTER.
-
-**Nota: En caso de que no encuentre el archivo .mysql:**
-
-buscar el archivo kamdbctl.mysql
-```sudo find / -type f -name "kamdbctl.mysql" 2>/dev/null```
-
-ruta_original = ruta donde se encuentra kamdbctl.mysql
-ruta_final = ruta donde debería estar kamdbctl.mysql y donde lo busca mysql
-
-```sudo cp ruta_original ruta_final```
-
-
-# Scripts para iniciar el servicio
-
-El servicio de kamailio ya debería estar ejecutándose. Se puede revisar con
-
-```systemctl | grep running```
-
-y confirmar que se está ejecutando. Se puede iniciar y detener con:
-
-```
-systemctl start kamailio
-systemctl stop kamailio
+```bash
+sudo systemctl status kamailio
 ```
 
-**IMPORTANTE**: Si se realiza un cambio en el archivo ```kamailio.cfg``` y al se iniciar/resetear el servicio aparece un error, este se puede revisar leyendo el archivo ```var/log/syslog```
+Start, stop or restart it with:
 
-También se puede configurar en consola para que inicie de forma automática al bootear (no sé si funciona bien):
-
-```
-sudo update-rc.d kamailio defaults
-sudo update-rc.d kamailio enable
-```
-# Agregar usuarios
-
-Se pueden añadir usuarios a la base de datos usando:
-
-```kamctl add username password```
-
-Ejemplo:
-
-```
-kamctl add diego 9856
-kamctl add tablet 9856
-kamctl add 123 9856
-kamctl add 456 9856
-```
-# Logs (NO funciona bien) 
-
-Mover logs de Kamailio a otro archivo.
-
-https://www.kamailio.org/wikidocs/tutorials/3.2.x/syslog/#kamailio-with-syslog-and-log-rotate
-
-Los logs se guardarán en el archivo ```/var/log/kamailio.log```
-
-Crear el archivo ```10-kamailio.conf``` en la carpeta ```/etc/rsyslog.d```
-
-```
-sudo nano /etc/rsyslog.d/10-kamailio.conf
-```
-Dentro del archivo, agregar lo siguiente:
-```
-# log messages with LOG_LOCAL0 in /var/log/kamailio.log
-local0.*            -/var/log/kamailio.log
+```bash
+sudo systemctl start kamailio
+sudo systemctl stop kamailio
+sudo systemctl restart kamailio
 ```
 
-Finalmente, resetear rsyslog
+> **Important:** if you change `kamailio.cfg` and the service fails to start or restart, check the system log for the error:
+>
+> ```bash
+> sudo tail -n 50 /var/log/syslog
+> ```
 
-```sudo systemctl restart rsyslog```
+### Start automatically at boot
 
-
-## Crear Log Rotate para kamailio.log (NO funciona bien)
-
-```sudo nano /etc/logrotate.d/kamailio```
-
-y dentro del archivo agregar lo siguiente:
-
-```
-/var/log/kamailio.log {
-    missingok
-    size 50M
-    create 0644 root root
-    postrotate
-        systemctl restart rsyslog > /dev/null 2>&1 || true
-    endscript
-}
-```
-Luego, ejecutar:
-
-```
-sudo chmod 755 /var/log/
-systemctl restart rsyslog
+```bash
+sudo systemctl enable kamailio
 ```
 
-Se puede revisar que se borró el log con
+## 3. Adding users
 
-```sudo logrotate -f /etc/logrotate.d/kamailio```
+Users are added to the database with `kamctl`:
 
+```bash
+kamctl add <username> <password>
+```
+
+Example:
+
+```bash
+kamctl add 1001 <password>
+kamctl add 1002 <password>
+kamctl add alice <password>
+```
+
+A username can be a phone number or any other value; it becomes the user part of the SIP URI (for example, `sip:1001@<server_ip>`).

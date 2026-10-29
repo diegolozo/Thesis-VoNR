@@ -1,21 +1,78 @@
+"""
+extract_baresip_metrics.py
+
+Extracts the raw call metrics (packets, bitrate, errors, packet report,
+lost packets and jitter, for TX and RX) from the log files of the Baresip+
+application and saves them as one CSV file for audio and one for video.
+
+HOW TO USE
+----------
+1. Save the log of the terminal after every 7 calls, to avoid losing data by
+   overwriting. This produces several .txt files per scenario and flow.
+
+2. Merge the .txt files of the scenario and flow into a single file named
+   "merged.txt" (Linux `cat` command), for example:
+
+       cat part1.txt part2.txt part3.txt > merged.txt
+       cat part*.txt > merged.txt
+
+3. Place "merged.txt" in the folder:
+
+       <BASE_DIR>/scene_<SCENE>/<FLOW>/merged.txt
+
+4. Set the three variables in the CONFIGURATION section below
+   (BASE_DIR, SCENE and FLOW). They are the only values that need to be
+   edited; all the paths are built from them.
+
+5. Run the script. The output folder "<BASE_DIR>/done/" is created
+   automatically if it does not exist, and the script prints where the
+   results were saved when it finishes.
+
+OUTPUT
+------
+    <BASE_DIR>/done/scene<SCENE><FLOW>_audio.csv
+    <BASE_DIR>/done/scene<SCENE><FLOW>_video.csv
+
+Both files use ";" as delimiter and have one row per call, with the columns:
+call_num, packets_tx, packets_rx, bitrate_tx, bitrate_rx, errors_tx, errors_rx,
+pkt_report_tx, pkt_report_rx, lost_tx, lost_rx, jitter_tx, jitter_rx
+"""
+
+import os
 import re
 import csv
 
-# Para obtener merged:
+# =========================
+# CONFIGURATION
+# =========================
+BASE_DIR = "baresip_log"  # Folder that contains the logs and the "done" output folder
+SCENE = "10"              # Scenario number
+FLOW = "A"                # Flow identifier ("A" or "B")
 
-# cat part1.txt part2.txt part3.txt > merged.txt
-# cat part*.txt > merged.txt
+# Paths (built from the variables above, do not edit)
+logfile = f"{BASE_DIR}/scene_{SCENE}/{FLOW}/merged.txt"
+output_dir = f"{BASE_DIR}/done"
+audio_csv_path = f"{output_dir}/scene{SCENE}{FLOW}_audio.csv"
+video_csv_path = f"{output_dir}/scene{SCENE}{FLOW}_video.csv"
 
-logfile = "baresip_log/scene_10/A/merged.txt"
+# =========================
+# CHECK INPUT AND OUTPUT FOLDERS
+# =========================
+if not os.path.isfile(logfile):
+    raise FileNotFoundError(
+        f"Input file not found: {logfile}\n"
+        f"Check BASE_DIR, SCENE and FLOW, and make sure the merged log is saved "
+        f"as 'merged.txt' in that folder."
+    )
 
-audio_csv_path = "baresip_log/done/scene10A_audio.csv"
-video_csv_path = "baresip_log/done/scene10A_video.csv"
+# Create the output folder if it does not exist
+os.makedirs(output_dir, exist_ok=True)
 
 with open(logfile) as f:
     lines = f.readlines()
 
 # -------------------------
-# 1️⃣ Limpiar prefijo
+# Remove prefix
 # -------------------------
 clean_lines = []
 
@@ -28,7 +85,7 @@ for line in lines:
     clean_lines.append(cleaned)
 
 # -------------------------
-# 2️⃣ Reparar bloques
+# Repair broken blocks
 # -------------------------
 fixed_lines = []
 i = 0
@@ -37,14 +94,14 @@ while i < len(clean_lines):
 
     line = clean_lines[i].rstrip()
 
-    # ===== RECOMPONER "errors" PARTIDO =====
+    # ===== REBUILD SPLIT "errors" LINE =====
     if line.strip() == "err" and i+1 < len(clean_lines):
 
         next_line = clean_lines[i+1].strip()
 
         if next_line.startswith("ors"):
 
-            # Extraer números si existen
+            # Extract the numbers, if any
             nums = re.findall(r'\d+', next_line)
 
             if len(nums) >= 2:
@@ -52,9 +109,9 @@ while i < len(clean_lines):
             else:
                 line = "errors:"
 
-            i += 1  # saltar "ors"
+            i += 1  # skip "ors"
 
-    # ===== UNIR JITTER =====
+    # ===== JOIN JITTER LINES =====
     elif "jitter:" in line and i+1 < len(clean_lines):
 
         next_line = clean_lines[i+1]
@@ -63,7 +120,7 @@ while i < len(clean_lines):
             line = line + " " + next_line.strip()
             i += 1
 
-    # ===== UNIR errors normales =====
+    # ===== JOIN REGULAR errors LINES =====
     elif line.strip().endswith("errors:") and i+1 < len(clean_lines):
 
         next_line = clean_lines[i+1]
@@ -99,7 +156,7 @@ video_blocks = [b[0] for b in video_blocks if "packets:" in b[0]]
 
 
 # =========================
-# ALMACENAR DATOS PARA CSV
+# STORE DATA FOR THE CSV FILES
 # =========================
 audio_csv_data = []
 video_csv_data = []
@@ -135,7 +192,7 @@ for i, block in enumerate(audio_blocks):
     if jitter:
         print("Jitter TX/RX:", jitter.groups())
 
-    # Procesar lost con valor absoluto
+    # Process lost packets using the absolute value
     lost_tx_value = ''
     lost_rx_value = ''
     if lost:
@@ -146,7 +203,7 @@ for i, block in enumerate(audio_blocks):
             lost_tx_value = ''
             lost_rx_value = ''
 
-    # Guardar TODAS las columnas
+    # Store ALL the columns
     audio_row = {
         'call_num': i+1,
         'packets_tx': packets.groups()[0] if packets else '',
@@ -197,7 +254,7 @@ for i, block in enumerate(video_blocks):
     if jitter:
         print("Jitter TX/RX:", jitter.groups())
 
-    # Procesar lost con valor absoluto
+    # Process lost packets using the absolute value
     lost_tx_value = ''
     lost_rx_value = ''
     if lost:
@@ -208,7 +265,7 @@ for i, block in enumerate(video_blocks):
             lost_tx_value = ''
             lost_rx_value = ''
 
-    # Guardar TODAS las columnas
+    # Store ALL the columns
     video_row = {
         'call_num': i+1,
         'packets_tx': packets.groups()[0] if packets else '',
@@ -228,10 +285,10 @@ for i, block in enumerate(video_blocks):
 
 
 # =========================
-# GUARDAR CSVs
+# SAVE CSV FILES
 # =========================
 
-# CSV de AUDIO
+# AUDIO CSV
 with open(audio_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
     fieldnames = [
         'call_num', 
@@ -246,10 +303,10 @@ with open(audio_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
     writer.writeheader()
     writer.writerows(audio_csv_data)
 
-print(f"\n✅ Archivo CSV de AUDIO guardado: {audio_csv_path}")
-print(f"   Columnas: call_num | packets_tx | packets_rx | bitrate_tx | bitrate_rx | errors_tx | errors_rx | pkt_report_tx | pkt_report_rx | lost_tx | lost_rx | jitter_tx | jitter_rx")
+print(f"\n✅ AUDIO CSV file saved: {audio_csv_path}")
+print(f"   Columns: call_num | packets_tx | packets_rx | bitrate_tx | bitrate_rx | errors_tx | errors_rx | pkt_report_tx | pkt_report_rx | lost_tx | lost_rx | jitter_tx | jitter_rx")
 
-# CSV de VIDEO
+# VIDEO CSV
 with open(video_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
     fieldnames = [
         'call_num', 
@@ -264,16 +321,28 @@ with open(video_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
     writer.writeheader()
     writer.writerows(video_csv_data)
 
-print(f"✅ Archivo CSV de VIDEO guardado: {video_csv_path}")
-print(f"   Columnas: call_num | packets_tx | packets_rx | bitrate_tx | bitrate_rx | errors_tx | errors_rx | pkt_report_tx | pkt_report_rx | lost_tx | lost_rx | jitter_tx | jitter_rx")
+print(f"VIDEO CSV file saved: {video_csv_path}")
+print(f"   Columns: call_num | packets_tx | packets_rx | bitrate_tx | bitrate_rx | errors_tx | errors_rx | pkt_report_tx | pkt_report_rx | lost_tx | lost_rx | jitter_tx | jitter_rx")
 
-# Mostrar preview
-print("\n📊 PREVIEW resultados_audio.csv (primeras 3 filas):")
+# Show preview
+print(f"\nPREVIEW {audio_csv_path} (first 3 rows):")
 print("-" * 80)
 for row in audio_csv_data[:3]:
     print(f"Call {row['call_num']}: packets({row['packets_tx']}/{row['packets_rx']}) | bitrate({row['bitrate_tx']}/{row['bitrate_rx']}) | lost({row['lost_tx']}/{row['lost_rx']}) | jitter({row['jitter_tx']}/{row['jitter_rx']})")
 
-print("\n📊 PREVIEW resultados_video.csv (primeras 3 filas):")
+print(f"\n📊REVIEW {video_csv_path} (first 3 rows):")
 print("-" * 80)
 for row in video_csv_data[:3]:
     print(f"Call {row['call_num']}: packets({row['packets_tx']}/{row['packets_rx']}) | bitrate({row['bitrate_tx']}/{row['bitrate_rx']}) | lost({row['lost_tx']}/{row['lost_rx']}) | jitter({row['jitter_tx']}/{row['jitter_rx']})")
+
+# =========================
+# SUMMARY
+# =========================
+print("\n" + "=" * 80)
+print(f"DONE: scene {SCENE}, flow {FLOW}")
+print(f"  Audio calls processed: {len(audio_csv_data)}")
+print(f"  Video calls processed: {len(video_csv_data)}")
+print(f"  Results saved in the folder: {os.path.abspath(output_dir)}")
+print(f"    - {os.path.basename(audio_csv_path)}")
+print(f"    - {os.path.basename(video_csv_path)}")
+print("=" * 80)
